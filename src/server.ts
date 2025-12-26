@@ -6,6 +6,8 @@ import { app } from "./app";
 import { Request, Response, NextFunction } from "express";
 import { HttpErrorResponse } from "@shared/interfaces/http/http.responses.interface";
 import { allExceptionsFilter } from "@shared/filters/all-exceptions.filter";
+import { env } from '@config/env';
+import { logger } from '@shared/logger/logger';
 
 app.use("/user", user);
 app.use("/account", account);
@@ -17,4 +19,8 @@ app.use((
   next: NextFunction
 ) => {
   allExceptionsFilter(err, req, res, next);
+});
+
+app.listen(env.PORT, () => {
+  logger.info(`Server is running on port ${env.PORT}`);
 });
