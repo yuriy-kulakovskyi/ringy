@@ -1,10 +1,10 @@
 import { env } from "@config/env"
 import { AppError } from "@shared/errors/app-error"
-import { IUserResponseResponse } from "@shared/interfaces/user/user.interface"
+import { IUserResponse } from "@shared/interfaces/user/user.interface"
 import { logger } from "@shared/logger/logger"
 
 export class AlternativeAuthClient {
-  async verify(token: string): Promise<IUserResponseResponse> {
+  async verify(token: string): Promise<IUserResponse> {
     try {
       const response = await fetch(env.VERIFY_TOKEN_URL, {
         method: "POST",
@@ -27,8 +27,13 @@ export class AlternativeAuthClient {
         throw new AppError(500, "Invalid response format");
       }
 
+      if (response.status !== 200) {
+        logger.error(`AlternativeAuthClient verify unsuccessful: ${JSON.stringify(json)}`);
+        throw new AppError(401, "Authentication failed");
+      }
+
       logger.info(`AlternativeAuthClient verify succeeded for token`);
-      return json as IUserResponseResponse;
+      return json as IUserResponse;
     } catch (error) {
       if (error instanceof AppError) {
         logger.error(`AlternativeAuthClient verify error: ${error.message}`);

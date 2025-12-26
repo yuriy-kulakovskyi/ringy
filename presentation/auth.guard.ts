@@ -1,47 +1,50 @@
+import { container } from "tsyringe"
 import { Request , Response, NextFunction } from "express"
 import { AppError } from "@shared/errors/app-error"
-import { container } from "tsyringe"
 import { AlternativeAuthClient } from "@infrastructure/auth/alternative-auth.client"
-import { IUserResponseResponse } from "@shared/interfaces/user/user.interface"
+import { IUserResponse } from "@shared/interfaces/user/user.interface"
 import { logger } from "@shared/logger/logger"
 
-export const authMiddleware = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const rawToken = req.headers.authorization
-
-  if (!rawToken) {
-    logger.error(`Auth middleware missing authorization header`);
-    return next(new AppError(401, "Authorization token is missing"))
-  }
-
-  const token = rawToken.replace(/^Bearer\s+/i, '');
-  if (!token || token === rawToken) {
-    logger.error(`Auth middleware invalid authorization header format`);
-    return next(new AppError(401, "Invalid authorization header"));
-  }
-
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   try {
+    const header = req.headers.authorization;
+    const rawToken = Array.isArray(header) ? header[0] : (header || "")
+
+    if (!rawToken) {
+      logger.error(`Auth middleware missing authorization header`)
+      return next(new AppError(401, "Authorization token is missing"))
+    }
+
+    const match = rawToken.match(/^Bearer\s+(.+)$/i)
+    if (!match) {
+      logger.error(`Auth middleware invalid authorization header format`)
+      return next(new AppError(401, "Invalid authorization header format"))
+    }
+
+    const token = match[1]
+
     const authClient = container.resolve(AlternativeAuthClient)
-    const data = await authClient.verify(token) as IUserResponseResponse;
+    const data = await authClient.verify(token) as IUserResponse | null
 
-    if (!data.user.user_id) {
-      logger.error(`Auth middleware user not found in token response`);
-      return next(new AppError(404, "User not found"))
+    if (!data) {
+      logger.error(`Auth middleware no response from auth client`)
+      return next(new AppError(401, "Authentication failed"))
     }
 
-    logger.info(`Auth middleware authenticated user ${data.user.user_id}`);
+    if (!data.success) {
+      logger.error(`Auth middleware authentication failed`)
+      next(new AppError(401, "Authentication failed"))
+    }
+
+    if (!data.user?.user_id) {
+      logger.error(`Auth middleware user not found in token response`)
+      next(new AppError(404, "User not found"))
+    }
+
+    logger.info(`Auth middleware authenticated user ${data.user.user_id}`)
     req.user = data.user;
-    next()
+    next();
   } catch (err) {
-    const error = err as Error;
-    if (error.message?.includes('expired') || error.name === 'TokenExpiredError') {
-      logger.error(`Auth middleware token expired: ${error.message}`);
-      return next(new AppError(401, "Token expired"));
-    }
-    logger.error(`Auth middleware invalid token: ${error.message}`);
-    next(new AppError(401, "Invalid token"));
+    next(err); 
   }
 }

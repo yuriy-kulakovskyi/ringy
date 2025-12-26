@@ -1,4 +1,4 @@
-export interface IUserResponseResponse {
+export interface IUserResponse {
   success: boolean;
   user: IUser;
 }

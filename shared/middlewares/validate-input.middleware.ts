@@ -1,0 +1,37 @@
+import { AppError } from "@shared/errors/app-error";
+import { Request, Response, NextFunction } from "express";
+import { z } from "zod";
+
+type MiddlewareFunction = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => void;
+
+type ValidateInput = (
+  schema: z.ZodObject<{
+    body?: z.ZodTypeAny;
+    query?: z.ZodTypeAny;
+    params?: z.ZodTypeAny;
+    error?: z.ZodTypeAny;
+  }>
+) => MiddlewareFunction;
+
+export const validateInput: ValidateInput =
+  (schema): MiddlewareFunction =>
+  (req, res, next) => {
+    // Validate the input
+    const result = schema.safeParse({
+      body: req.body,
+      query: req.query,
+      params: req.params
+    });
+
+    // If the validation fails, throw an AppError with the validation errors
+    if (!result.success) {
+      throw new AppError(400, "Validation Error", result.error.message);
+    }
+
+    // Call the next middleware or route handler
+    next();
+  };

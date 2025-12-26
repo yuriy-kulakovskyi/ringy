@@ -13,8 +13,7 @@ export const env = {
   PORT: Number(process.env.PORT ?? 3000),
   VERIFY_TOKEN_URL: required("VERIFY_TOKEN_URL"),
   ALTERNATIVE_AUTH_API_KEY: required("ALTERNATIVE_AUTH_API_KEY"),
-
-  // DATABASE_URL: required("DATABASE_URL"),
+  DATABASE_URL: required("DATABASE_URL"),
 
   // // Stripe
   // STRIPE_SECRET_KEY: required("STRIPE_SECRET_KEY"),
