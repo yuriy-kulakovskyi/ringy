@@ -70,14 +70,22 @@ export class WebhooksCalHandler {
           });
         });
 
-        const callAt = dayjs.utc(startTime).subtract(3, 'hour');
-        const delay = callAt.diff(dayjs.utc());
+        const callTime = dayjs.utc(startTime);
+        const now = dayjs.utc();
 
-        console.log(
-          `Scheduling call for booking ${bookingId} at ${callAt.toISOString()} (in ${delay} ms)`
-        );
+        const callAt = callTime.subtract(3, 'hour');
+        const effectiveCallAt = callAt.isBefore(now) ? now.add(1, 'second') : callAt;
+        const delay = effectiveCallAt.diff(now);
 
-        // cancel previous (reschedule)
+        logger.info(`Start time is ${startTime}`)
+        logger.info(`callTime is ${callTime.toISOString()}`);
+        logger.info(`Delay is ${delay}`);
+
+        if (delay <= 0) {
+          logger.info(`No need to schedule a call for booking ${bookingId}, call time is in the past.`);
+          return res.sendStatus(200);
+        }
+
         const existingJob = WebhooksCalHandler.scheduledJobs.get(bookingId);
         if (existingJob) {
           existingJob.stop();
@@ -90,6 +98,11 @@ export class WebhooksCalHandler {
           await prisma.outbox.updateMany({
             where: { payload: { path: ['bookingId'], equals: bookingId } },
             data: { processed: true },
+          });
+
+          await prisma.booking.update({
+            where: { bookingId },
+            data: { calledAt: new Date() },
           });
         }, delay);
 
@@ -169,6 +182,51 @@ export class WebhooksCalHandler {
     } catch (error) {
       logger.error(`Error creating CAL webhook: ${(error as Error).message}`);
       next(error);
+    }
+  }
+
+  public async recoverReminders() {
+    const now = dayjs.utc();
+
+    const pendingBookings = await prisma.booking.findMany({
+      where: {
+        startTime: { gte: now.toDate() },
+        calledAt: null,
+      },
+    });
+
+    for (const booking of pendingBookings) {
+      const bookingId = booking.bookingId.toString();
+      const callAt = dayjs.utc(booking.startTime).subtract(3, 'hour');
+      const delay = callAt.diff(now);
+
+      if (delay <= 0) continue; 
+
+      const existingJob = WebhooksCalHandler.scheduledJobs.get(bookingId);
+      if (existingJob) {
+        existingJob.stop();
+        WebhooksCalHandler.scheduledJobs.delete(bookingId);
+      }
+
+      const timeout = setTimeout(async () => {
+        console.log(`Recovered scheduled call for booking ${bookingId} is being processed.`);
+
+        await prisma.outbox.updateMany({
+          where: { payload: { path: ['bookingId'], equals: bookingId } },
+          data: { processed: true },
+        });
+
+        await prisma.booking.update({
+          where: { bookingId },
+          data: { calledAt: new Date() },
+        });
+      }, delay);
+
+      WebhooksCalHandler.scheduledJobs.set(bookingId, {
+        stop: () => clearTimeout(timeout),
+      });
+
+      console.log(`Recovered reminder scheduled for booking ${bookingId} at ${callAt.toISOString()} (in ${delay} ms)`);
     }
   }
 }
