@@ -7,10 +7,6 @@ const router = express.Router();
 
 const webhooksCalHandler = container.resolve(WebhooksCalHandler);
 
-webhooksCalHandler.recoverReminders().catch(err => {
-  console.error("Failed to recover reminders:", err);
-});
-
 router.post("/", webhooksCalHandler.handleWebhook.bind(webhooksCalHandler));
 router.post("/create", authMiddleware, webhooksCalHandler.createWebhook.bind(webhooksCalHandler));
 

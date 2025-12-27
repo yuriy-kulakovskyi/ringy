@@ -2,11 +2,9 @@ import { inject, injectable } from "tsyringe";
 import { Request, Response, NextFunction } from "express";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
+import cron from "node-cron";
 
 dayjs.extend(utc);
-type CancellableJob = {
-  stop: () => void;
-};
 
 import { logger } from "@shared/logger/logger";
 import { env } from "@config/env";
@@ -18,12 +16,12 @@ import { Attendee } from "../domain/interfaces/attendee.interface";
 
 @injectable()
 export class WebhooksCalHandler {
-  private static scheduledJobs: Map<string, CancellableJob> = new Map();
-
   constructor(
     @inject(CAL_SERVICE)
     private readonly calService: WebhooksCalService
-  ) { }
+  ) { 
+    this.startReminderCron();
+  }
 
   async handleWebhook(req: Request, res: Response) {
     const { triggerEvent: eventType, payload } = req.body;
@@ -41,12 +39,16 @@ export class WebhooksCalHandler {
       return res.sendStatus(200);
     }
 
+    // TODO: Replace with actual phone from payload when available
     const phone = "21093912";
 
     const attendeesNames = attendees?.map((a: Attendee) => a.name) || "No attendees";
 
     try {
-      if (eventType === 'BOOKING_CREATED' || eventType === 'BOOKING_RESCHEDULED') {
+      if (eventType === "BOOKING_CREATED" || eventType === "BOOKING_RESCHEDULED") {
+        const callTime = dayjs.utc(startTime);
+        const reminderAt = callTime.subtract(3, "hour");
+
         await prisma.$transaction(async (tx) => {
           await tx.booking.upsert({
             where: { bookingId },
@@ -55,6 +57,7 @@ export class WebhooksCalHandler {
               organizer,
               attendees: attendeesNames,
               calledAt: null,
+              processed: false,
             },
             create: {
               bookingId,
@@ -62,77 +65,58 @@ export class WebhooksCalHandler {
               phone,
               organizer,
               attendees: attendeesNames,
+              processed: false,
             },
           });
 
           await tx.outbox.create({
-            data: { type: eventType, payload: { bookingId } },
+            data: {
+              type: "REMINDER",
+              payload: { bookingId },
+              reminderAt: reminderAt.toDate(),
+              processed: false,
+            },
           });
         });
 
-        const callTime = dayjs.utc(startTime);
-        const now = dayjs.utc();
-
-        const callAt = callTime.subtract(3, 'hour');
-        const effectiveCallAt = callAt.isBefore(now) ? now.add(1, 'second') : callAt;
-        const delay = effectiveCallAt.diff(now);
-
-        logger.info(`Start time is ${startTime}`)
-        logger.info(`callTime is ${callTime.toISOString()}`);
-        logger.info(`Delay is ${delay}`);
-
-        if (delay <= 0) {
-          logger.info(`No need to schedule a call for booking ${bookingId}, call time is in the past.`);
-          return res.sendStatus(200);
-        }
-
-        const existingJob = WebhooksCalHandler.scheduledJobs.get(bookingId);
-        if (existingJob) {
-          existingJob.stop();
-          WebhooksCalHandler.scheduledJobs.delete(bookingId);
-        }
-
-        const timeout = setTimeout(async () => {
-          console.log(`Scheduled call for booking ${bookingId} is being processed.`);
-
-          await prisma.outbox.updateMany({
-            where: { payload: { path: ['bookingId'], equals: bookingId } },
-            data: { processed: true },
-          });
-
-          await prisma.booking.update({
-            where: { bookingId },
-            data: { calledAt: new Date() },
-          });
-        }, delay);
-
-        WebhooksCalHandler.scheduledJobs.set(bookingId, {
-          stop: () => clearTimeout(timeout),
-        });
+        return res.sendStatus(200);
       }
 
-      if (eventType === 'BOOKING_CANCELLED') {
+      if (eventType === "BOOKING_CANCELLED") {
         await prisma.$transaction(async (tx) => {
           const result = await tx.booking.updateMany({
             where: { bookingId },
-            data: { calledAt: new Date() },
+            data: {
+              calledAt: new Date(),
+              processed: true,
+            },
           });
 
           if (result.count === 0) {
-            logger.warn(`BOOKING_CANCELLED received but booking not found: ${bookingId}`);
+            logger.warn(
+              `BOOKING_CANCELLED received but booking not found: ${bookingId}`
+            );
           }
 
-          await tx.outbox.create({
-            data: { type: 'BOOKING_CANCELLED', payload: { bookingId } },
+          await tx.outbox.updateMany({
+            where: {
+              type: "REMINDER",
+              processed: false,
+              payload: { path: ["bookingId"], equals: bookingId },
+            },
+            data: { processed: true },
           });
 
-          const job = WebhooksCalHandler.scheduledJobs.get(bookingId);
-          if (job) {
-            job.stop();
-            WebhooksCalHandler.scheduledJobs.delete(bookingId);
-            logger.info(`Cancelled scheduled cron job for booking ${bookingId}`);
-          }
+          await tx.outbox.create({
+            data: {
+              type: "BOOKING_CANCELLED",
+              payload: { bookingId },
+              processed: true,
+            },
+          });
         });
+
+        return res.sendStatus(200);
       }
 
       res.sendStatus(200);
@@ -163,7 +147,7 @@ export class WebhooksCalHandler {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          subscriberUrl: "https://2e12851e5c0b.ngrok-free.app/webhooks/cal",
+          subscriberUrl: "https://d11665956206.ngrok-free.app/webhooks/cal",
           triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
           active: true,
           payloadTemplate: null,
@@ -185,48 +169,78 @@ export class WebhooksCalHandler {
     }
   }
 
-  public async recoverReminders() {
-    const now = dayjs.utc();
+  private startReminderCron() {
+    cron.schedule("* * * * *", async () => {
+      const lockName = "reminder-cron";
 
-    const pendingBookings = await prisma.booking.findMany({
-      where: {
-        startTime: { gte: now.toDate() },
-        calledAt: null,
-      },
-    });
-
-    for (const booking of pendingBookings) {
-      const bookingId = booking.bookingId.toString();
-      const callAt = dayjs.utc(booking.startTime).subtract(3, 'hour');
-      const delay = callAt.diff(now);
-
-      if (delay <= 0) continue; 
-
-      const existingJob = WebhooksCalHandler.scheduledJobs.get(bookingId);
-      if (existingJob) {
-        existingJob.stop();
-        WebhooksCalHandler.scheduledJobs.delete(bookingId);
+      const hasLock = await acquireLock(lockName);
+      if (!hasLock) {
+        logger.info("Reminder cron skipped — lock already acquired");
+        return;
       }
 
-      const timeout = setTimeout(async () => {
-        console.log(`Recovered scheduled call for booking ${bookingId} is being processed.`);
+      try {
+        const now = dayjs.utc();
 
-        await prisma.outbox.updateMany({
-          where: { payload: { path: ['bookingId'], equals: bookingId } },
-          data: { processed: true },
+        const reminders = await prisma.outbox.findMany({
+          where: {
+            type: "REMINDER",
+            processed: false,
+            reminderAt: { lte: now.toDate() },
+          },
         });
 
-        await prisma.booking.update({
-          where: { bookingId },
-          data: { calledAt: new Date() },
-        });
-      }, delay);
+        for (const r of reminders) {
+          const payload = r.payload && typeof r.payload === "object" ? (r.payload as Record<string, any>) : null;
+          const bookingId = payload?.bookingId ? String(payload.bookingId) : undefined;
 
-      WebhooksCalHandler.scheduledJobs.set(bookingId, {
-        stop: () => clearTimeout(timeout),
-      });
+          if (!bookingId) {
+            logger.warn(`Skipping reminder ${r.id} because bookingId is missing in payload`);
+            await prisma.outbox.update({
+              where: { id: r.id },
+              data: { processed: true },
+            });
+            continue;
+          }
 
-      console.log(`Recovered reminder scheduled for booking ${bookingId} at ${callAt.toISOString()} (in ${delay} ms)`);
-    }
+          logger.info(`Processing reminder for booking ${bookingId}`);
+
+          // TODO: Integrate with VAPI to make the call here
+
+          await prisma.$transaction([
+            prisma.outbox.update({
+              where: { id: r.id },
+              data: { processed: true },
+            }),
+            prisma.booking.update({
+              where: { bookingId },
+              data: {
+                calledAt: new Date(),
+                processed: true,
+              },
+            }),
+          ]);
+        }
+      } catch (err) {
+        logger.error(err);
+      } finally {
+        await releaseLock(lockName);
+      }
+    });
   }
+}
+
+async function acquireLock(name: string): Promise<boolean> {
+  try {
+    await prisma.cronLock.create({
+      data: { name, lockedAt: new Date() },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function releaseLock(name: string) {
+  await prisma.cronLock.delete({ where: { name } });
 }

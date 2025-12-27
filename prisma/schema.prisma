@@ -40,13 +40,23 @@ model Booking {
   attendees String[]
   organizer String
 
+  processed Boolean  @default(false)
+
   createdAt DateTime @default(now())
 }
 
 model Outbox {
-  id        String   @id @default(uuid())
-  type      String
-  payload   Json
-  processed Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  type       String
+  payload    Json
+  processed  Boolean  @default(false)
+  reminderAt DateTime?
+  createdAt  DateTime @default(now())
+}
+
+model CronLock {
+  name     String   @id
+  lockedAt DateTime @map("locked_at")
+
+  @@map("cron_lock")
 }
