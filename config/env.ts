@@ -14,6 +14,7 @@ export const env = {
   VERIFY_TOKEN_URL: required("VERIFY_TOKEN_URL"),
   ALTERNATIVE_AUTH_API_KEY: required("ALTERNATIVE_AUTH_API_KEY"),
   DATABASE_URL: required("DATABASE_URL"),
+  CAL_WEBHOOK_SECRET: required("CAL_WEBHOOK_SECRET"),
 
   // // Stripe
   // STRIPE_SECRET_KEY: required("STRIPE_SECRET_KEY"),

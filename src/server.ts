@@ -8,9 +8,11 @@ import { HttpErrorResponse } from "@shared/interfaces/http/http.responses.interf
 import { allExceptionsFilter } from "@shared/filters/all-exceptions.filter";
 import { env } from '@config/env';
 import { logger } from '@shared/logger/logger';
+import { webhooksCal } from '@modules/cal/routes/webhooks-cal.routes';
 
 app.use("/user", user);
 app.use("/account", account);
+app.use("/webhooks/cal", webhooksCal);
 
 app.use((
   err: Error,
