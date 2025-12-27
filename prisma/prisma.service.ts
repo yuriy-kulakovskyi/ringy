@@ -3,6 +3,7 @@ import 'dotenv/config'
 import { PrismaClient } from "../generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { env } from "@config/env";
+import { logger } from '@shared/logger/logger';
 
 const connectionString = env.DATABASE_URL;
 
@@ -17,7 +18,7 @@ const prisma = new PrismaClient({ adapter, log: [
 
 prisma.$on('query', (e) => {
   if (e.duration > 200) {
-    console.warn(`Slow query detected: ${e.query} (${e.duration}ms)`);
+    logger.warn(`Slow query detected: ${e.query} (${e.duration}ms)`);
   }
 });
 
