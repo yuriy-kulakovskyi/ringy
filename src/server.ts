@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import '@config/di/account.di'; 
 import '@config/di/calendar.di';
+import '@config/di/cal.di';
 
 import { account } from "@modules/account/routes/account.routes";
 import { user } from "@modules/user/routes/user.routes";

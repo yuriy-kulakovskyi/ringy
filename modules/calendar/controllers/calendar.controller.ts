@@ -18,6 +18,7 @@ import { DeleteCalendarUseCase } from "@modules/calendar/application/usecases/de
 
 import { CreateCalendarRequest } from "@modules/calendar/domain/interfaces/create-calendar.interface";
 import { UpdateCalendarRequest } from "@modules/calendar/domain/interfaces/update-calendar.interface";
+import { AppError } from "@shared/errors/app-error";
 
 @injectable()
 export class CalendarController {
