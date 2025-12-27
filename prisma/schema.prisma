@@ -21,3 +21,12 @@ model Account {
   tokensLeft         Int
   expiresAt         Int?
 }
+
+model Calendar {
+  id                 String   @id @default(uuid())
+  userId             String   
+  accountId          String
+  apiKey             String
+  provider           String
+  isDeleted          Boolean  @default(false)
+}
