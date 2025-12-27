@@ -30,3 +30,23 @@ model Calendar {
   provider           String
   isDeleted          Boolean  @default(false)
 }
+
+model Booking {
+  id        String   @id @default(uuid())
+  bookingId String   @unique
+  startTime DateTime
+  phone     String?
+  calledAt  DateTime?
+  attendees String[]
+  organizer String
+
+  createdAt DateTime @default(now())
+}
+
+model Outbox {
+  id        String   @id @default(uuid())
+  type      String
+  payload   Json
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
