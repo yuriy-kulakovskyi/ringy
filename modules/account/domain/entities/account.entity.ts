@@ -4,6 +4,8 @@ export class AccountEntity {
     public readonly userId: string,
     public readonly type: string,
     public readonly tokensLeft: number,
-    public readonly expiresAt: number | null
+    public readonly expiresAt: number | null,
+    public readonly phoneNumber?: string,
+    public readonly remindBeforeMinutes?: number,
   ) {}
 }

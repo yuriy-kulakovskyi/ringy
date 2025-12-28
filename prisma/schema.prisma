@@ -20,6 +20,8 @@ model Account {
   type               String
   tokensLeft         Int
   expiresAt         Int?
+  phoneNumber       String?
+  remindBeforeMinutes Int?
 }
 
 model Calendar {
