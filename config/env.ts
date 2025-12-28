@@ -16,15 +16,12 @@ export const env = {
   DATABASE_URL: required("DATABASE_URL"),
   CAL_WEBHOOK_CREATION_URL: required("CAL_WEBHOOK_CREATION_URL"),
   REDIS_URL: required("REDIS_URL"),
+  VAPI_API_KEY: required("VAPI_API_KEY"),
+  ASSISTANT_ID: required("ASSISTANT_ID"),
+  PHONE_NUMBER_ID: required("PHONE_NUMBER_ID"),
+  VAPI_CALL_URL: required("VAPI_CALL_URL"),
 
   // // Stripe
   // STRIPE_SECRET_KEY: required("STRIPE_SECRET_KEY"),
   // STRIPE_WEBHOOK_SECRET: required("STRIPE_WEBHOOK_SECRET"),
-
-  // // Cal.com
-  // CALCOM_API_BASE_URL: "https://api.cal.com/v2",
-  // CALCOM_API_KEY: required("CALCOM_API_KEY"),
-
-  // // VAPI
-  // VAPI_API_KEY: required("VAPI_API_KEY"),
 }

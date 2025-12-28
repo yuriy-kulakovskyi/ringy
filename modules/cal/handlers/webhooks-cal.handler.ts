@@ -16,6 +16,7 @@ import { Attendee } from "../domain/interfaces/attendee.interface";
 import { ACCOUNT_SERVICE } from "@modules/account/domain/tokens/account.tokens";
 import { AccountService } from "@modules/account/application/services/account.service";
 import { acquireLock, releaseLock } from "@infrastructure/lock/lock.client";
+import { AccountEntity } from "@modules/account/domain/entities/account.entity";
 
 @injectable()
 export class WebhooksCalHandler {
@@ -50,7 +51,7 @@ export class WebhooksCalHandler {
       ...(attendees?.map((a: Attendee) => a.email) ?? []),
     ].filter(Boolean);   
 
-    const numbers: string[] = [];
+    const accounts: AccountEntity[] = [];
 
     for (const email of memberEmails) {
       const account = await this.accountService.getAccountByEmail(email);
@@ -61,28 +62,18 @@ export class WebhooksCalHandler {
       }
 
       if (account.phoneNumber) {
-        numbers.push(account.phoneNumber);
+        accounts.push(account);
       }
-    }
-
-    // delete duplicates
-    const uniqueNumbers = Array.from(new Set(numbers));
-
-    if (uniqueNumbers.length === 0) {
-      logger.warn(`No phone numbers found for bookingId ${bookingId} in webhook processing`);
-      return res.sendStatus(200);
     }
 
     const attendeesNames: string[] =
       attendees?.map((a: Attendee) => a.name) ?? [];
 
     logger.info(`Processing webhook event ${eventType} for bookingId ${bookingId} with attendees: ${memberEmails.join(", ")}`);
-    logger.info(`Phone numbers to notify: ${uniqueNumbers.join(", ")}`);
 
     try {
       if (eventType === "BOOKING_CREATED" || eventType === "BOOKING_RESCHEDULED") {
         const callTime = dayjs.utc(startTime);
-        const reminderAt = callTime.subtract(3, "hour");
 
         await prisma.$transaction(async (tx) => {
           await tx.booking.upsert({
@@ -101,11 +92,21 @@ export class WebhooksCalHandler {
             },
           });
 
-          for (const phone of uniqueNumbers) {
+          for (const account of accounts) {
+            if (!account.phoneNumber) continue;
+
+            const remindMinutes = account.remindBeforeMinutes ?? 180; 
+
+            const reminderAt = callTime.subtract(remindMinutes, "minute");
+
             await tx.outbox.create({
               data: {
                 type: "REMINDER",
-                payload: { bookingId, phone },
+                payload: {
+                  bookingId,
+                  phone: account.phoneNumber,
+                  accountId: account.id,
+                },
                 reminderAt: reminderAt.toDate(),
                 processed: false,
               },
@@ -181,7 +182,7 @@ export class WebhooksCalHandler {
         },
         body: JSON.stringify({
           // TODO: Replace with actual ngrok URL or dynamic URL from config
-          subscriberUrl: "https://9fa0d349234c.ngrok-free.app/webhooks/cal",
+          subscriberUrl: "https://cba6abcffb87.ngrok-free.app/webhooks/cal",
           triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
           active: true,
           payloadTemplate: null,
@@ -239,9 +240,41 @@ export class WebhooksCalHandler {
 
           const phone = payload?.phone;
 
+          if (!phone) {
+            logger.warn(`Skipping reminder ${r.id} because phone number is missing in payload`);
+            continue;
+          }
+
           logger.info(`Calling ${phone} for booking ${bookingId}`);
 
-          // TODO: Integrate with VAPI to make the call here
+          const response = await fetch(env.VAPI_CALL_URL, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.VAPI_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              assistantId: env.ASSISTANT_ID,
+              phoneNumberId: env.PHONE_NUMBER_ID,
+              customer: {
+                number: "+44123456789",
+              },
+               assistantOverrides: {
+                variableValues: {
+                  booking_id: bookingId,
+                  time_to_call: now.format("YYYY-MM-DD HH:mm:ss"),
+                }
+              }
+            }),
+          });
+
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`VAPI call failed: ${error}`);
+          }
+
+          const callData = await response.json();
+          console.log("Call data:", callData); 
 
           await prisma.$transaction([
             prisma.outbox.update({
