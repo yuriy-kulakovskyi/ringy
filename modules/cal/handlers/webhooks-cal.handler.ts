@@ -182,7 +182,7 @@ export class WebhooksCalHandler {
         },
         body: JSON.stringify({
           // TODO: Replace with actual ngrok URL or dynamic URL from config
-          subscriberUrl: "https://cba6abcffb87.ngrok-free.app/webhooks/cal",
+          subscriberUrl: "https://858c6d1de1c4.ngrok-free.app/webhooks/cal",
           triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
           active: true,
           payloadTemplate: null,
@@ -240,6 +240,16 @@ export class WebhooksCalHandler {
 
           const phone = payload?.phone;
 
+
+          const startTime = await prisma.booking.findFirst({
+            where: {
+              bookingId,
+            },
+            select: {
+              startTime: true,
+            },
+          })
+
           if (!phone) {
             logger.warn(`Skipping reminder ${r.id} because phone number is missing in payload`);
             continue;
@@ -259,10 +269,21 @@ export class WebhooksCalHandler {
               customer: {
                 number: phone,
               },
-               assistantOverrides: {
+              assistantOverrides: {
+                model: {
+                  provider: "openai",
+                  model: "gpt-4o",
+                  messages: [
+                    {
+                      role: "system",
+                      content: "You are calling about booking {{booking_id}}. This is going to happen in {{start_time}} format it to a more human-readable form."
+                    }
+                  ]
+                },
+                firstMessage: "Hi! I'm calling regarding your booking {{booking_id}}.",
                 variableValues: {
                   booking_id: bookingId,
-                  time_to_call: now.format("YYYY-MM-DD HH:mm:ss"),
+                  start_time: startTime?.startTime ? dayjs(startTime.startTime).format("YYYY-MM-DD HH:mm:ss") : undefined,
                 }
               }
             }),
