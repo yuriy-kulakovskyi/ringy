@@ -257,7 +257,7 @@ export class WebhooksCalHandler {
               assistantId: env.ASSISTANT_ID,
               phoneNumberId: env.PHONE_NUMBER_ID,
               customer: {
-                number: "+44123456789",
+                number: phone,
               },
                assistantOverrides: {
                 variableValues: {
