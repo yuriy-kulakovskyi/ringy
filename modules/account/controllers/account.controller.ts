@@ -14,8 +14,8 @@ export class AccountController {
     return this.accountService.getMe(userId);
   }
 
-  createAccount(userId: string) {
-    return this.accountService.createAccount(userId);
+  createAccount(userId: string, userEmail: string) {
+    return this.accountService.createAccount(userId, userEmail);
   }
 
   updateAccountSettings(request: UpdateAccountRequest) {

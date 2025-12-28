@@ -3,14 +3,13 @@ import { ACCOUNT_REPOSITORY } from "@modules/account/domain/tokens/account.token
 import { PrismaAccountRepository } from "@modules/account/infrastructure/prisma-account.repository";
 
 @injectable()
-export class CreateAccountUseCase {
+export class GetAccountByEmailUseCase {
   constructor(
     @inject(ACCOUNT_REPOSITORY)
-    private readonly accountRepository: PrismaAccountRepository
+    private readonly accountRepository: PrismaAccountRepository,
   ) {}
 
-  async execute(userId: string, userEmail: string) {
-    const created = await this.accountRepository.createAccount(userId, userEmail);
-    return created;
+  async execute(email: string) {
+    return this.accountRepository.getAccountByEmail(email);
   }
 }

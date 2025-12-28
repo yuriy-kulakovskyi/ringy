@@ -13,12 +13,18 @@ import { CAL_SERVICE } from "@modules/cal/domain/tokens/cal.tokens";
 import { AppError } from "@shared/errors/app-error";
 import prisma from "prisma/prisma.service";
 import { Attendee } from "../domain/interfaces/attendee.interface";
+import { ACCOUNT_SERVICE } from "@modules/account/domain/tokens/account.tokens";
+import { AccountService } from "@modules/account/application/services/account.service";
+import { acquireLock, releaseLock } from "@infrastructure/lock/lock.client";
 
 @injectable()
 export class WebhooksCalHandler {
   constructor(
     @inject(CAL_SERVICE)
-    private readonly calService: WebhooksCalService
+    private readonly calService: WebhooksCalService,
+
+    @inject(ACCOUNT_SERVICE)
+    private readonly accountService: AccountService
   ) { 
     this.startReminderCron();
   }
@@ -39,10 +45,39 @@ export class WebhooksCalHandler {
       return res.sendStatus(200);
     }
 
-    // TODO: Replace with actual phone from payload when available
-    const phone = "21093912";
+    const memberEmails: string[] = [
+      organizerObject?.email,
+      ...(attendees?.map((a: Attendee) => a.email) ?? []),
+    ].filter(Boolean);   
 
-    const attendeesNames = attendees?.map((a: Attendee) => a.name) || "No attendees";
+    const numbers: string[] = [];
+
+    for (const email of memberEmails) {
+      const account = await this.accountService.getAccountByEmail(email);
+
+      if (!account) {
+        logger.warn(`No account found for email ${email} in webhook processing`);
+        continue;
+      }
+
+      if (account.phoneNumber) {
+        numbers.push(account.phoneNumber);
+      }
+    }
+
+    // delete duplicates
+    const uniqueNumbers = Array.from(new Set(numbers));
+
+    if (uniqueNumbers.length === 0) {
+      logger.warn(`No phone numbers found for bookingId ${bookingId} in webhook processing`);
+      return res.sendStatus(200);
+    }
+
+    const attendeesNames: string[] =
+      attendees?.map((a: Attendee) => a.name) ?? [];
+
+    logger.info(`Processing webhook event ${eventType} for bookingId ${bookingId} with attendees: ${memberEmails.join(", ")}`);
+    logger.info(`Phone numbers to notify: ${uniqueNumbers.join(", ")}`);
 
     try {
       if (eventType === "BOOKING_CREATED" || eventType === "BOOKING_RESCHEDULED") {
@@ -57,26 +92,25 @@ export class WebhooksCalHandler {
               organizer,
               attendees: attendeesNames,
               calledAt: null,
-              processed: false,
             },
             create: {
               bookingId,
               startTime: new Date(startTime),
-              phone,
               organizer,
               attendees: attendeesNames,
-              processed: false,
             },
           });
 
-          await tx.outbox.create({
-            data: {
-              type: "REMINDER",
-              payload: { bookingId },
-              reminderAt: reminderAt.toDate(),
-              processed: false,
-            },
-          });
+          for (const phone of uniqueNumbers) {
+            await tx.outbox.create({
+              data: {
+                type: "REMINDER",
+                payload: { bookingId, phone },
+                reminderAt: reminderAt.toDate(),
+                processed: false,
+              },
+            });
+          }
         });
 
         return res.sendStatus(200);
@@ -88,7 +122,6 @@ export class WebhooksCalHandler {
             where: { bookingId },
             data: {
               calledAt: new Date(),
-              processed: true,
             },
           });
 
@@ -147,7 +180,8 @@ export class WebhooksCalHandler {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          subscriberUrl: "https://d11665956206.ngrok-free.app/webhooks/cal",
+          // TODO: Replace with actual ngrok URL or dynamic URL from config
+          subscriberUrl: "https://9fa0d349234c.ngrok-free.app/webhooks/cal",
           triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
           active: true,
           payloadTemplate: null,
@@ -203,7 +237,9 @@ export class WebhooksCalHandler {
             continue;
           }
 
-          logger.info(`Processing reminder for booking ${bookingId}`);
+          const phone = payload?.phone;
+
+          logger.info(`Calling ${phone} for booking ${bookingId}`);
 
           // TODO: Integrate with VAPI to make the call here
 
@@ -215,8 +251,7 @@ export class WebhooksCalHandler {
             prisma.booking.update({
               where: { bookingId },
               data: {
-                calledAt: new Date(),
-                processed: true,
+                calledAt: new Date()
               },
             }),
           ]);
@@ -228,19 +263,4 @@ export class WebhooksCalHandler {
       }
     });
   }
-}
-
-async function acquireLock(name: string): Promise<boolean> {
-  try {
-    await prisma.cronLock.create({
-      data: { name, lockedAt: new Date() },
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function releaseLock(name: string) {
-  await prisma.cronLock.delete({ where: { name } });
 }

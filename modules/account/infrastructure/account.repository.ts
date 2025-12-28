@@ -3,6 +3,7 @@ import { UpdateAccountRequest } from "@modules/account/domain/interfaces/update-
 
 export interface AccountRepository {
   getMe(userId: string): Promise<AccountEntity | Partial<AccountEntity>>;
-  createAccount(userId: string): Promise<AccountEntity>;
+  createAccount(userId: string, userEmail: string): Promise<AccountEntity>;
   updateAccountSettings(request: UpdateAccountRequest): Promise<AccountEntity>;
+  getAccountByEmail(email: string): Promise<AccountEntity | null>;
 }

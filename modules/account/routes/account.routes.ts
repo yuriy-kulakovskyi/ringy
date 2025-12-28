@@ -23,7 +23,7 @@ router.post(
   authMiddleware,
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const created = await accountController.createAccount(req.user.user_id);
+      const created = await accountController.createAccount(req.user.user_id, req.user.email);
       res.status(201).json(created);
     } catch (error) {
       next(error);

@@ -17,6 +17,7 @@ datasource db {
 model Account {
   id                 String   @id @default(uuid())
   userId             String   @unique
+  userEmail          String   @unique
   type               String
   tokensLeft         Int
   expiresAt         Int?
@@ -41,8 +42,6 @@ model Booking {
   calledAt  DateTime?
   attendees String[]
   organizer String
-
-  processed Boolean  @default(false)
 
   createdAt DateTime @default(now())
 }

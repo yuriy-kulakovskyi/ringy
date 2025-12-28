@@ -5,6 +5,7 @@ export class AccountEntity {
     public readonly type: string,
     public readonly tokensLeft: number,
     public readonly expiresAt: number | null,
+    public readonly userEmail: string,
     public readonly phoneNumber?: string,
     public readonly remindBeforeMinutes?: number,
   ) {}

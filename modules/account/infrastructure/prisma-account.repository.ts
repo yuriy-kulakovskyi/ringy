@@ -32,6 +32,7 @@ export class PrismaAccountRepository implements AccountRepository {
         account.type,
         account.tokensLeft,
         account.expiresAt ? new Date(account.expiresAt).getTime() : null,
+        account.userEmail,
         account.phoneNumber || undefined,
         account.remindBeforeMinutes || undefined,
       );
@@ -41,7 +42,7 @@ export class PrismaAccountRepository implements AccountRepository {
     }
   }
 
-  async createAccount(userId: string) {
+  async createAccount(userId: string, userEmail: string) {
     try {
       if (!userId) {
         logger.error("PrismaAccountRepository createAccount called with empty userId");
@@ -54,6 +55,7 @@ export class PrismaAccountRepository implements AccountRepository {
           type: "standard",
           tokensLeft: 100,
           expiresAt: null,
+          userEmail: userEmail,
         },
       });
 
@@ -64,6 +66,7 @@ export class PrismaAccountRepository implements AccountRepository {
         newAccount.type,
         newAccount.tokensLeft,
         newAccount.expiresAt ? new Date(newAccount.expiresAt).getTime() : null,
+        newAccount.userEmail,
         newAccount.phoneNumber || undefined,
         newAccount.remindBeforeMinutes || undefined,
       );
@@ -108,11 +111,38 @@ export class PrismaAccountRepository implements AccountRepository {
         updatedAccount.type,
         updatedAccount.tokensLeft,
         updatedAccount.expiresAt ? new Date(updatedAccount.expiresAt).getTime() : null,
+        updatedAccount.userEmail,
         updatedAccount.phoneNumber || undefined,
         updatedAccount.remindBeforeMinutes || undefined,
       );
     } catch (error) {
       logger.error(`PrismaAccountRepository updateAccountSettings error: ${(error as Error).message}`);
+      throw new AppError(500, "Database error");
+    }
+  }
+
+  async getAccountByEmail(email: string): Promise<AccountEntity | null> {
+    try {
+      const account = await prisma.account.findFirst({
+        where: { userEmail: email }
+      });
+
+      if (!account) {
+        return null;
+      }
+
+      return new AccountEntity(
+        account.id,
+        account.userId,
+        account.type,
+        account.tokensLeft,
+        account.expiresAt ? new Date(account.expiresAt).getTime() : null,
+        account.userEmail,
+        account.phoneNumber || undefined,
+        account.remindBeforeMinutes || undefined,
+      );
+    } catch (error) {
+      logger.error(`PrismaAccountRepository getAccountByEmail error: ${(error as Error).message}`);
       throw new AppError(500, "Database error");
     }
   }
