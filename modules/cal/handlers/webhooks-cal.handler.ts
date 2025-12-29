@@ -2,21 +2,20 @@ import { inject, injectable } from "tsyringe";
 import { Request, Response, NextFunction } from "express";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
-import cron from "node-cron";
 
 dayjs.extend(utc);
 
 import { logger } from "@shared/logger/logger";
-import { env } from "@config/env";
 import { WebhooksCalService } from "@modules/cal/application/services/cal.service";
 import { CAL_SERVICE } from "@modules/cal/domain/tokens/cal.tokens";
 import { AppError } from "@shared/errors/app-error";
-import prisma from "prisma/prisma.service";
 import { Attendee } from "../domain/interfaces/attendee.interface";
 import { ACCOUNT_SERVICE } from "@modules/account/domain/tokens/account.tokens";
 import { AccountService } from "@modules/account/application/services/account.service";
-import { acquireLock, releaseLock } from "@infrastructure/lock/lock.client";
 import { AccountEntity } from "@modules/account/domain/entities/account.entity";
+import { vapiMakeCall } from "../application/services/vapi.service";
+import { scheduledBookingsHandler } from "./scheduled-bookings.handler";
+import { canceledBookingsHandler } from "./cancelled-bookings.handler";
 
 @injectable()
 export class WebhooksCalHandler {
@@ -26,9 +25,7 @@ export class WebhooksCalHandler {
 
     @inject(ACCOUNT_SERVICE)
     private readonly accountService: AccountService
-  ) { 
-    this.startReminderCron();
-  }
+  ) {}
 
   async handleWebhook(req: Request, res: Response) {
     const { triggerEvent: eventType, payload } = req.body;
@@ -73,87 +70,24 @@ export class WebhooksCalHandler {
 
     try {
       if (eventType === "BOOKING_CREATED" || eventType === "BOOKING_RESCHEDULED") {
-        const callTime = dayjs.utc(startTime);
-
-        await prisma.$transaction(async (tx) => {
-          await tx.booking.upsert({
-            where: { bookingId },
-            update: {
-              startTime: new Date(startTime),
-              organizer,
-              attendees: attendeesNames,
-              calledAt: null,
-            },
-            create: {
-              bookingId,
-              startTime: new Date(startTime),
-              organizer,
-              attendees: attendeesNames,
-            },
-          });
-
-          for (const account of accounts) {
-            if (!account.phoneNumber) continue;
-
-            const remindMinutes = account.remindBeforeMinutes ?? 180; 
-
-            const reminderAt = callTime.subtract(remindMinutes, "minute");
-
-            await tx.outbox.create({
-              data: {
-                type: "REMINDER",
-                payload: {
-                  bookingId,
-                  phone: account.phoneNumber,
-                  accountId: account.id,
-                },
-                reminderAt: reminderAt.toDate(),
-                processed: false,
-              },
-            });
-          }
-        });
+        await scheduledBookingsHandler(
+          bookingId,
+          startTime,
+          organizer,
+          attendeesNames,
+          accounts,
+        );
 
         return res.sendStatus(200);
       }
 
       if (eventType === "BOOKING_CANCELLED") {
-        await prisma.$transaction(async (tx) => {
-          const result = await tx.booking.updateMany({
-            where: { bookingId },
-            data: {
-              calledAt: new Date(),
-            },
-          });
-
-          if (result.count === 0) {
-            logger.warn(
-              `BOOKING_CANCELLED received but booking not found: ${bookingId}`
-            );
-          }
-
-          await tx.outbox.updateMany({
-            where: {
-              type: "REMINDER",
-              processed: false,
-              payload: { path: ["bookingId"], equals: bookingId },
-            },
-            data: { processed: true },
-          });
-
-          await tx.outbox.create({
-            data: {
-              type: "BOOKING_CANCELLED",
-              payload: { bookingId },
-              processed: true,
-            },
-          });
-        });
+        await canceledBookingsHandler(
+          bookingId,
+        );
 
         return res.sendStatus(200);
       }
-
-      res.sendStatus(200);
     } catch (err) {
       console.error(err);
       res.sendStatus(500);
@@ -161,160 +95,18 @@ export class WebhooksCalHandler {
   }
 
   async createWebhook(req: Request, res: Response, next: NextFunction) {
-    try {
-      const userId = req.user?.user_id;
-      if (!userId) {
-        logger.error("WebhooksCalHandler.createWebhook: missing authenticated user");
-        return next(new AppError(401, "Unauthorized"));
-      }
-
-      const apiKey = await this.calService.getUserApiKey(userId, "cal");
-      if (!apiKey) {
-        logger.error(`WebhooksCalHandler.createWebhook: API key not found for user ${userId}`);
-        return next(new AppError(404, "API key not found for user"));
-      }
-
-      const response = await fetch(env.CAL_WEBHOOK_CREATION_URL, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          // TODO: Replace with actual ngrok URL or dynamic URL from config
-          subscriberUrl: "https://858c6d1de1c4.ngrok-free.app/webhooks/cal",
-          triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
-          active: true,
-          payloadTemplate: null,
-        }),
-      });
-
-      if (!response.ok) {
-        logger.error(`Failed to create CAL webhook with status ${response.status}`);
-        throw new AppError(response.status, "Failed to create CAL webhook");
-      }
-
-      const data = await response.json();
-      logger.info(`CAL webhook created successfully: ${JSON.stringify(data)}`);
-
-      res.status(201).json({ message: "CAL webhook created", data });
-    } catch (error) {
-      logger.error(`Error creating CAL webhook: ${(error as Error).message}`);
-      next(error);
+    const userId = req.user?.user_id;
+    if (!userId) {
+      logger.error("WebhooksCalHandler.createWebhook: missing authenticated user");
+      return next(new AppError(401, "Unauthorized"));
     }
-  }
 
-  private startReminderCron() {
-    cron.schedule("* * * * *", async () => {
-      const lockName = "reminder-cron";
+    const apiKey = await this.calService.getUserApiKey(userId, "cal");
+    if (!apiKey) {
+      logger.error(`WebhooksCalHandler.createWebhook: API key not found for user ${userId}`);
+      return next(new AppError(404, "API key not found for user"));
+    }
 
-      const hasLock = await acquireLock(lockName);
-      if (!hasLock) {
-        logger.info("Reminder cron skipped — lock already acquired");
-        return;
-      }
-
-      try {
-        const now = dayjs.utc();
-
-        const reminders = await prisma.outbox.findMany({
-          where: {
-            type: "REMINDER",
-            processed: false,
-            reminderAt: { lte: now.toDate() },
-          },
-        });
-
-        for (const r of reminders) {
-          const payload = r.payload && typeof r.payload === "object" ? (r.payload as Record<string, any>) : null;
-          const bookingId = payload?.bookingId ? String(payload.bookingId) : undefined;
-
-          if (!bookingId) {
-            logger.warn(`Skipping reminder ${r.id} because bookingId is missing in payload`);
-            await prisma.outbox.update({
-              where: { id: r.id },
-              data: { processed: true },
-            });
-            continue;
-          }
-
-          const phone = payload?.phone;
-
-
-          const startTime = await prisma.booking.findFirst({
-            where: {
-              bookingId,
-            },
-            select: {
-              startTime: true,
-            },
-          })
-
-          if (!phone) {
-            logger.warn(`Skipping reminder ${r.id} because phone number is missing in payload`);
-            continue;
-          }
-
-          logger.info(`Calling ${phone} for booking ${bookingId}`);
-
-          const response = await fetch(env.VAPI_CALL_URL, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${env.VAPI_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              assistantId: env.ASSISTANT_ID,
-              phoneNumberId: env.PHONE_NUMBER_ID,
-              customer: {
-                number: phone,
-              },
-              assistantOverrides: {
-                model: {
-                  provider: "openai",
-                  model: "gpt-4o",
-                  messages: [
-                    {
-                      role: "system",
-                      content: "You are calling about booking {{booking_id}}. This is going to happen in {{start_time}} format it to a more human-readable form."
-                    }
-                  ]
-                },
-                firstMessage: "Hi! I'm calling regarding your booking {{booking_id}}.",
-                variableValues: {
-                  booking_id: bookingId,
-                  start_time: startTime?.startTime ? dayjs(startTime.startTime).format("YYYY-MM-DD HH:mm:ss") : undefined,
-                }
-              }
-            }),
-          });
-
-          if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`VAPI call failed: ${error}`);
-          }
-
-          const callData = await response.json();
-          console.log("Call data:", callData); 
-
-          await prisma.$transaction([
-            prisma.outbox.update({
-              where: { id: r.id },
-              data: { processed: true },
-            }),
-            prisma.booking.update({
-              where: { bookingId },
-              data: {
-                calledAt: new Date()
-              },
-            }),
-          ]);
-        }
-      } catch (err) {
-        logger.error(err);
-      } finally {
-        await releaseLock(lockName);
-      }
-    });
+    await vapiMakeCall(res, next, apiKey);
   }
 }
