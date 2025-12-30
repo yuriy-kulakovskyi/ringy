@@ -9,11 +9,11 @@ import { logger } from "@shared/logger/logger";
 import { WebhooksCalService } from "@modules/cal/application/services/cal.service";
 import { CAL_SERVICE } from "@modules/cal/domain/tokens/cal.tokens";
 import { AppError } from "@shared/errors/app-error";
-import { Attendee } from "../domain/interfaces/attendee.interface";
+import { Attendee } from "@modules/cal/domain/interfaces/attendee.interface";
 import { ACCOUNT_SERVICE } from "@modules/account/domain/tokens/account.tokens";
 import { AccountService } from "@modules/account/application/services/account.service";
 import { AccountEntity } from "@modules/account/domain/entities/account.entity";
-import { vapiMakeCall } from "../application/services/vapi.service";
+import { createCalWebhook } from "@modules/cal/application/services/create-cal-webhook.service";
 import { scheduledBookingsHandler } from "./scheduled-bookings.handler";
 import { canceledBookingsHandler } from "./cancelled-bookings.handler";
 
@@ -107,6 +107,6 @@ export class WebhooksCalHandler {
       return next(new AppError(404, "API key not found for user"));
     }
 
-    await vapiMakeCall(res, next, apiKey);
+    await createCalWebhook(res, next, apiKey);
   }
 }

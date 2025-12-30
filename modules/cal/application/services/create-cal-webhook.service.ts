@@ -3,7 +3,7 @@ import { logger } from "@shared/logger/logger";
 import { Response, NextFunction } from "express";
 import { env } from "@config/env";
 
-export const vapiMakeCall = async (res: Response, next: NextFunction, apiKey: string) => {
+export const createCalWebhook = async (res: Response, next: NextFunction, apiKey: string) => {
   if (!apiKey) {
     logger.error(`WebhooksCalHandler.createWebhook: API key is not provided`);
     return next(new AppError(404, "API key not found for user"));
@@ -18,7 +18,7 @@ export const vapiMakeCall = async (res: Response, next: NextFunction, apiKey: st
       },
       body: JSON.stringify({
         // TODO: Replace with actual ngrok URL or dynamic URL from config
-        subscriberUrl: "https://12f6d7869561.ngrok-free.app/webhooks/cal",
+        subscriberUrl: "https://bc341889188b.ngrok-free.app/webhooks/cal",
         triggers: ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"],
         active: true,
         payloadTemplate: null,
