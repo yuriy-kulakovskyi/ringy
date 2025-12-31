@@ -102,8 +102,3 @@ This document describes the main API flows, middleware, and background processes
   Body: { "triggerEvent": "BOOKING_CREATED", "payload": { "bookingId": "123", "startTime": "...", "organizer": {...} } }
 
   Response: 200 OK
-
-**Next steps & notes**
-- **Where to edit**: this file is located at docs/api-flow.md.
-- **Improvements**: add sequence diagrams and concrete JSON schemas for all request/response shapes.
-
